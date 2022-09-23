@@ -11,7 +11,7 @@ else()
 endif()
 
 # pcl 1.7 causes a segfault when it is built with debug mode
-set(CMAKE_BUILD_TYPE "RELEASE")
+set(CMAKE_BUILD_TYPE "DEBUG")
 
 find_package(catkin REQUIRED COMPONENTS
   nodelet
@@ -29,6 +29,7 @@ find_package(catkin REQUIRED COMPONENTS
   ndt_omp
   fast_gicp
   hdl_global_localization
+  livox_ros_driver
 )
 
 find_package(PCL 1.7 REQUIRED)

@@ -5,6 +5,7 @@
 #include <ros/ros.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl_ros/transforms.h>
+#include <pcl_conversions/pcl_conversions.h>
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
 
@@ -19,6 +20,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <livox_ros_driver/CustomMsg.h>
 
 #include <pcl/filters/voxel_grid.h>
 
@@ -61,6 +63,13 @@ public:
       imu_sub = mt_nh.subscribe("/gpsimu_driver/imu_data", 256, &HdlLocalizationNodelet::imu_callback, this);
     }
     points_sub = mt_nh.subscribe("/velodyne_points", 5, &HdlLocalizationNodelet::points_callback, this);
+
+    use_livox = private_nh.param<bool>("use_livox", false);
+    if (use_livox) {
+      livox_points_sub = mt_nh.subscribe("/livox/lidar", 5, &HdlLocalizationNodelet::livox_points_callback, this);
+      points_pub = nh.advertise<sensor_msgs::PointCloud2>("/velodyne_points", 5, false);
+    }
+    
     globalmap_sub = nh.subscribe("/globalmap", 1, &HdlLocalizationNodelet::globalmap_callback, this);
     initialpose_sub = nh.subscribe("/initialpose", 8, &HdlLocalizationNodelet::initialpose_callback, this);
 
@@ -175,6 +184,37 @@ private:
   void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) {
     std::lock_guard<std::mutex> lock(imu_data_mutex);
     imu_data.push_back(imu_msg);
+  }
+
+  /**
+   * @brief callback for livox point cloud data
+   * @param points_msg
+   */
+  void livox_points_callback(const livox_ros_driver::CustomMsg::ConstPtr & msg) {
+    int plsize = msg->point_num;
+    pcl::PointCloud<pcl::PointXYZINormal> pl_pcl;
+    pcl::PointXYZINormal single_point;
+    sensor_msgs::PointCloud2 pl;
+
+    for(uint i=1; i<plsize; i++)
+    {
+      if((msg->points[i].line < 16) && ((msg->points[i].tag & 0x30) == 0x10 || (msg->points[i].tag & 0x30) == 0x00))
+      {
+        single_point.x = msg->points[i].x;
+        single_point.y = msg->points[i].y;
+        single_point.z = msg->points[i].z;
+        single_point.intensity = msg->points[i].reflectivity;
+        single_point.curvature = msg->points[i].offset_time / float(1000000); //use curvature as time of each laser points
+        pl_pcl.push_back(single_point);
+      }
+      else {
+        NODELET_ERROR("transfer livox msg to PointCloud2 error");
+        return;
+      }
+    }
+    pcl::toROSMsg(pl_pcl, pl);
+    pl.header.frame_id = "velodyne";
+    points_pub.publish(pl);
   }
 
   /**
@@ -506,14 +546,17 @@ private:
   bool use_imu;
   bool invert_acc;
   bool invert_gyro;
+  bool use_livox;
   ros::Subscriber imu_sub;
   ros::Subscriber points_sub;
+  ros::Subscriber livox_points_sub;
   ros::Subscriber globalmap_sub;
   ros::Subscriber initialpose_sub;
 
   ros::Publisher pose_pub;
   ros::Publisher aligned_pub;
   ros::Publisher status_pub;
+  ros::Publisher points_pub;
 
   tf2_ros::Buffer tf_buffer;
   tf2_ros::TransformListener tf_listener;
